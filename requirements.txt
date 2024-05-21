@@ -6,3 +6,4 @@ scikit-learn
 nltk
 python-docx
 openpyxl
+hugchat==0.0.8
