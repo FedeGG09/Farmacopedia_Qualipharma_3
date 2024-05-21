@@ -10,6 +10,7 @@ from document_analysis import (
     almacenar_reglas_vectorizadas,
     cargar_y_vectorizar_manual
 )
+from utils import verify_differences_compliance  # Importar la nueva función
 
 # Función para procesar documentos
 def procesar_documentos(uploaded_reference_file, uploaded_compare_file, reference_file_type, compare_file_type):
@@ -180,27 +181,6 @@ if st.sidebar.button("Verificar Cumplimiento de Diferencias") and uploaded_file1
         tokens_referencia = st.session_state.get('tokens_referencia', [])
         diferencias_vectorizadas1 = st.session_state.get('diferencias_vectorizadas1', [])
         diferencias_vectorizadas2 = st.session_state.get('diferencias_vectorizadas2', [])
-
-        def verify_differences_compliance(diferencias_vectorizadas, tokens_referencia):
-            diferencias_no_cumplen = []
-            for diferencia in diferencias_vectorizadas:
-                if diferencia['contenido_documento'] not in tokens_referencia:
-                    diferencias_no_cumplen.append(diferencia)
-
-            if diferencias_no_cumplen:
-                st.warning("Algunas diferencias no cumplen con las normativas establecidas en el manual de referencia.")
-                st.header("Diferencias No Cumplen con el Manual")
-                diferencias_tabla = [
-                    [diferencia.get('seccion', 'N/A'), 
-                     diferencia.get('contenido_referencia', 'N/A'), 
-                     diferencia.get('contenido_documento', 'N/A'), 
-                     diferencia.get('tipo', 'N/A'),
-                     diferencia.get('recomendacion', 'N/A')]
-                    for diferencia in diferencias_no_cumplen
-                ]
-                st.table(pd.DataFrame(diferencias_tabla, columns=["Línea", "Sección", "Contenido de Referencia", "Tipo", "Recomendación"]))
-            else:
-                st.success("Todas las diferencias cumplen con las normativas establecidas en el manual de referencia.")
 
         verify_differences_compliance(diferencias_vectorizadas1, tokens_referencia)
         verify_differences_compliance(diferencias_vectorizadas2, tokens_referencia)
