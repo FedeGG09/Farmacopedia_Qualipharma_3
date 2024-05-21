@@ -3,6 +3,11 @@ import pandas as pd
 from hugchat import hugchat
 from hugchat.login import Login
 
+
+# Obtener el correo electrónico y la contraseña de las secrets
+hf_email = st.secrets["HF_EMAIL"]
+hf_pass = st.secrets["HF_PASS"]
+
 from document_analysis import (
     extraer_texto_pdf,
     extraer_texto_docx,
