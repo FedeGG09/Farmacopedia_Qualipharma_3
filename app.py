@@ -158,6 +158,7 @@ if st.sidebar.button("Cargar y Vectorizar Manual") and uploaded_reference_file:
     ]
     tokens_referencia = load_manual(texto_manual, indice_manual)
     st.session_state['manual_cargado'] = True
+    st.session_state['texto_manual'] = texto_manual
 
 # Sección para comparar documentos adicionales
 st.sidebar.header("Comparar Documentos Adicionales")
@@ -218,8 +219,7 @@ if prompt := st.chat_input():
 if st.session_state.messages[-1]["role"] != "assistant":
     with st.chat_message("assistant"):
         with st.spinner("Pensando..."):
-            response = generate_response(prompt, {"manual": texto_manual, "context_text": texto_comparar})
+            response = generate_response(prompt, {"manual": st.session_state.get('texto_manual', ""), "context_text": texto_comparar}) 
             st.write(response) 
     message = {"role": "assistant", "content": response}
     st.session_state.messages.append(message)
-
