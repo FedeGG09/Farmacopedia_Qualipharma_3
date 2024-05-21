@@ -1,5 +1,9 @@
 import streamlit as st
 import pandas as pd
+import streamlit as st
+from hugchat import hugchat
+from hugchat.login import Login
+
 from document_analysis import (
     extraer_texto_pdf,
     extraer_texto_docx,
@@ -11,6 +15,58 @@ from document_analysis import (
     cargar_y_vectorizar_manual
 )
 from utils import verify_differences_compliance  # Importar la nueva función
+
+# Título de la aplicación
+st.set_page_config(page_title="🤗💬 HugChat")
+
+# Credenciales de Hugging Face
+with st.sidebar:
+    st.title('🤗💬 HugChat')
+    if ('EMAIL' in st.secrets) and ('PASS' in st.secrets):
+        st.success('¡Las credenciales de inicio de sesión de HuggingFace ya fueron proporcionadas!', icon='✅')
+        hf_email = st.secrets['EMAIL']
+        hf_pass = st.secrets['PASS']
+    else:
+        hf_email = st.text_input('Ingresa tu correo electrónico:', type='password')
+        hf_pass = st.text_input('Ingresa tu contraseña:', type='password')
+        if not (hf_email and hf_pass):
+            st.warning('¡Por favor ingresa tus credenciales!', icon='⚠️')
+        else:
+            st.success('¡Procede a ingresar tu mensaje de solicitud!', icon='👉')
+    st.markdown('📖 Aprende cómo construir esta aplicación en este [blog](https://blog.streamlit.io/how-to-build-an-llm-powered-chatbot-with-streamlit/)!')
+
+# Almacenar las respuestas generadas por el LLM
+if "messages" not in st.session_state.keys():
+    st.session_state.messages = [{"role": "assistant", "content": "¿En qué puedo ayudarte?"}]
+
+# Mostrar los mensajes del chat
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.write(message["content"])
+
+# Función para generar la respuesta del LLM
+def generate_response(prompt_input, email, passwd):
+    # Iniciar sesión en Hugging Face
+    sign = Login(email, passwd)
+    cookies = sign.login()
+    # Crear el ChatBot
+    chatbot = hugchat.ChatBot(cookies=cookies.get_dict())
+    return chatbot.chat(prompt_input)
+
+# Entrada proporcionada por el usuario
+if prompt := st.chat_input(disabled=not (hf_email and hf_pass)):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.write(prompt)
+
+# Generar una nueva respuesta si el último mensaje no es del asistente
+if st.session_state.messages[-1]["role"] != "assistant":
+    with st.chat_message("assistant"):
+        with st.spinner("Pensando..."):
+            response = generate_response(prompt, hf_email, hf_pass) 
+            st.write(response) 
+    message = {"role": "assistant", "content": response}
+    st.session_state.messages.append(message)
 
 # Función para procesar documentos
 def procesar_documentos(uploaded_reference_file, uploaded_compare_file, reference_file_type, compare_file_type):
@@ -186,3 +242,11 @@ if st.sidebar.button("Verificar Cumplimiento de Diferencias") and uploaded_file1
         verify_differences_compliance(diferencias_vectorizadas2, tokens_referencia)
     else:
         st.error("Primero debes cargar y vectorizar el manual de referencia.")
+
+# Obtener el texto del manual y los textos relevantes
+texto_manual = extraer_texto(reference_file_type, uploaded_reference_file)
+texto_comparar = extraer_texto(compare_file_type, uploaded_compare_file)
+
+# Llamar a la función para generar la respuesta
+response = generate_response(prompt, hf_email, hf_pass, {"manual": texto_manual, "context_text": texto_comparar})
+
