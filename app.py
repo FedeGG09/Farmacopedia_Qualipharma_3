@@ -218,16 +218,8 @@ if prompt := st.chat_input():
 if st.session_state.messages[-1]["role"] != "assistant":
     with st.chat_message("assistant"):
         with st.spinner("Pensando..."):
-            response = generate_response(prompt, hf_email, hf_pass) 
+            response = generate_response(prompt, {"manual": texto_manual, "context_text": texto_comparar})
             st.write(response) 
     message = {"role": "assistant", "content": response}
     st.session_state.messages.append(message)
-
-
-# Obtener el texto del manual y los textos relevantes
-texto_manual = extraer_texto(reference_file_type, uploaded_reference_file)
-texto_comparar = extraer_texto(compare_file_type, uploaded_compare_file)
-
-# Llamar a la función para generar la respuesta
-response = generate_response(prompt, hf_email, hf_pass, {"manual": texto_manual, "context_text": texto_comparar})
 
