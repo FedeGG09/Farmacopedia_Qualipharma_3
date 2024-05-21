@@ -2,12 +2,6 @@ import streamlit as st
 import pandas as pd
 from hugchat import hugchat
 from hugchat.login import Login
-
-
-# Obtener el correo electrónico y la contraseña de las secrets
-hf_email = st.secrets["HF_EMAIL"]
-hf_pass = st.secrets["HF_PASS"]
-
 from document_analysis import (
     extraer_texto_pdf,
     extraer_texto_docx,
@@ -19,6 +13,10 @@ from document_analysis import (
     cargar_y_vectorizar_manual
 )
 from utils import verify_differences_compliance  # Importar la nueva función
+
+# Obtener el correo electrónico y la contraseña de las secrets
+hf_email = st.secrets["HF_EMAIL"]
+hf_pass = st.secrets["HF_PASS"]
 
 # Función para procesar documentos
 def procesar_documentos(uploaded_reference_file, uploaded_compare_file, reference_file_type, compare_file_type):
@@ -197,7 +195,7 @@ if st.sidebar.button("Verificar Cumplimiento de Diferencias") and uploaded_file1
         st.error("Primero debes cargar y vectorizar el manual de referencia.")
 
 # Store LLM generated responses
-if "messages" not in st.session_state.keys():
+if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "How may I help you?"}]
 
 # Display chat messages
@@ -207,12 +205,16 @@ for message in st.session_state.messages:
 
 # Function for generating LLM response
 def generate_response(prompt_input, email, passwd):
-    # Hugging Face Login
-    sign = Login(email, passwd)
-    cookies = sign.login()
-    # Create ChatBot                        
-    chatbot = hugchat.ChatBot(cookies=cookies.get_dict())
-    return chatbot.chat(prompt_input)
+    try:
+        # Hugging Face Login
+        sign = Login(email, passwd)
+        cookies = sign.login()
+        # Create ChatBot
+        chatbot = hugchat.ChatBot(cookies=cookies.get_dict())
+        return chatbot.chat(prompt_input)
+    except Exception as e:
+        st.error(f"An error occurred during login or chatbot creation: {e}")
+        return "Failed to generate response."
 
 # User-provided prompt
 if prompt := st.chat_input():
@@ -220,11 +222,11 @@ if prompt := st.chat_input():
     with st.chat_message("user"):
         st.write(prompt)
 
-# Generate a new response if last message is not from assistant
-if st.session_state.messages[-1]["role"] != "assistant":
-    with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            response = generate_response(prompt, hf_email, hf_pass) 
-            st.write(response) 
-    message = {"role": "assistant", "content": response}
-    st.session_state.messages.append(message)
+    # Generate a new response if last message is not from assistant
+    if st.session_state.messages[-1]["role"] != "assistant":
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                response = generate_response(prompt, hf_email, hf_pass)
+                st.write(response)
+        message = {"role": "assistant", "content": response}
+        st.session_state.messages.append(message)
