@@ -209,7 +209,7 @@ def generate_response(prompt_input, context):
     return chatbot.chat(prompt_input)
 
 # Entrada proporcionada por el usuario
-if prompt := st.chat_input(disabled=not (hf_email and hf_pass)):
+if prompt := st.chat_input():
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.write(prompt)
