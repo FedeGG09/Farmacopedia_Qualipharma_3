@@ -206,7 +206,7 @@ def generate_response(prompt_input, context):
     texto_manual = context.get("manual", "")
     texto_comparar = context.get("context_text", "")
     # Crear el ChatBot
-    chatbot = hugchat.ChatBot(cookies=cookies.get_dict())
+    chatbot = hugchat.ChatBot()
     return chatbot.chat(prompt_input)
 
 # Entrada proporcionada por el usuario
