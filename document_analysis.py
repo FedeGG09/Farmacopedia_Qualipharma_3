@@ -1,123 +1,116 @@
-import os
-import pandas as pd
-import pdfminer.high_level
-import json
-import csv
-import docx
-from sklearn.feature_extraction.text import TfidfVectorizer
+from PyPDF2 import PdfFileReader
 from docx import Document
-from nltk.tokenize import word_tokenize
-from nltk.stem import WordNetLemmatizer
-import logging
-import nltk
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+import re
 
-nltk.download('punkt')
-nltk.download('wordnet')
-
-logging.basicConfig(filename='logs/document_analysis.log', level=logging.DEBUG)
-
-lemmatizer = WordNetLemmatizer()
-
-def extraer_texto_docx(docx_file):
+# Función para extraer texto de archivos PDF
+def extraer_texto_pdf(file):
+    pdf = PdfFileReader(file)
     texto = ""
-    doc = Document(docx_file)
-    for paragraph in doc.paragraphs:
-        texto += paragraph.text + "\n"
-    return texto.strip()
+    for page in range(pdf.getNumPages()):
+        texto += pdf.getPage(page).extractText()
+    return texto
 
-def extraer_texto_pdf(pdf_file):
-    return pdfminer.high_level.extract_text(pdf_file)
+# Función para extraer texto de archivos DOCX
+def extraer_texto_docx(file):
+    doc = Document(file)
+    texto = ""
+    for para in doc.paragraphs:
+        texto += para.text + "\n"
+    return texto
 
-def leer_archivo_texto(txt_file):
-    return txt_file.read().decode('utf-8')
+# Función para leer archivos de texto plano
+def leer_archivo_texto(file):
+    return file.read().decode("utf-8")
 
-def tokenizar_lineamientos(lineamientos):
-    tokens = []
-    for lineamiento in lineamientos:
-        tokens.extend(word_tokenize(lineamiento))
-    return list(set(tokens))
-
-def vectorizar_texto(texto, tokens_referencia):
-    vectorizer = TfidfVectorizer(vocabulary=tokens_referencia, lowercase=False)
-    vector_tfidf = vectorizer.fit_transform([texto])
-    return vector_tfidf.toarray()
-
-def encontrar_diferencias(documento1, documento2):
+# Función para encontrar diferencias entre dos textos
+def encontrar_diferencias(texto_comparar, texto_referencia):
     diferencias = []
-    try:
-        lineas1 = documento1.split('\n')
-        lineas2 = documento2.split('\n')
+    lineas_comparar = texto_comparar.splitlines()
+    lineas_referencia = texto_referencia.splitlines()
 
-        for i, (linea1, linea2) in enumerate(zip(lineas1, lineas2), start=1):
-            if linea1 != linea2:
-                diferencia = {
-                    "seccion": f"Línea {i}",
-                    "contenido_referencia": linea1,
-                    "contenido_documento": linea2,
-                    "tipo": "Línea",
-                    "recomendacion": f"Revisar la línea {i} en el documento y ajustarla según el manual."
-                }
-                diferencias.append(diferencia)
+    for i, linea in enumerate(lineas_comparar):
+        if i < len(lineas_referencia):
+            if linea != lineas_referencia[i]:
+                diferencias.append({
+                    'linea': i + 1,
+                    'contenido_referencia': lineas_referencia[i],
+                    'contenido_documento': linea,
+                    'tipo': 'Diferencia'
+                })
+        else:
+            diferencias.append({
+                'linea': i + 1,
+                'contenido_referencia': '',
+                'contenido_documento': linea,
+                'tipo': 'Adicional'
+            })
 
-        return diferencias
-    except Exception as e:
-        logging.error(f"Error al encontrar diferencias: {e}")
-        return None
+    for i in range(len(lineas_comparar), len(lineas_referencia)):
+        diferencias.append({
+            'linea': i + 1,
+            'contenido_referencia': lineas_referencia[i],
+            'contenido_documento': '',
+            'tipo': 'Faltante'
+        })
 
-def vectorizar_y_tokenizar_diferencias(diferencias, tokens_referencia, nombre_documento_comparar, nombre_documento_referencia):
+    return diferencias
+
+# Función para tokenizar lineamientos
+def tokenizar_lineamientos(textos):
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(textos)
+    return vectorizer.get_feature_names_out()
+
+# Función para vectorizar y tokenizar diferencias
+def vectorizar_y_tokenizar_diferencias(diferencias, tokens_referencia, nombre_documento, nombre_referencia):
+    vectorizer = TfidfVectorizer()
+    all_texts = [d['contenido_documento'] for d in diferencias] + [d['contenido_referencia'] for d in diferencias]
+    tfidf_matrix = vectorizer.fit_transform(all_texts)
+
     diferencias_vectorizadas = []
     for diferencia in diferencias:
-        texto_diferencia = diferencia["contenido_referencia"] + " " + diferencia["contenido_documento"]
-        tokens_diferencia = tokenizar_lineamientos([texto_diferencia])
-        vector_tfidf_diferencia = vectorizar_texto(texto_diferencia, tokens_referencia)
-        diferencia["vector"] = vector_tfidf_diferencia.tolist()[0]
-        diferencias_vectorizadas.append(diferencia)
+        doc_vector = vectorizer.transform([diferencia['contenido_documento']])
+        ref_vector = vectorizer.transform([diferencia['contenido_referencia']])
+        similitud = cosine_similarity(doc_vector, ref_vector)[0][0]
 
-    if not diferencias_vectorizadas:
-        return None
+        diferencias_vectorizadas.append({
+            'linea': diferencia['linea'],
+            'seccion': diferencia.get('seccion', 'N/A'),
+            'contenido_referencia': diferencia['contenido_referencia'],
+            'contenido_documento': diferencia['contenido_documento'],
+            'tipo': diferencia['tipo'],
+            'similitud': similitud,
+            'recomendacion': 'Revisar' if similitud < 0.8 else 'Ok'
+        })
 
-    df_diferencias = pd.DataFrame(diferencias_vectorizadas)
-    ruta_directorio = "data/output/"
-    os.makedirs(ruta_directorio, exist_ok=True)
-    nombre_archivo_csv = f"{nombre_documento_referencia}_{nombre_documento_comparar}_diferencias.csv"
-    ruta_archivo_csv = os.path.join(ruta_directorio, nombre_archivo_csv)
-    df_diferencias.to_csv(ruta_archivo_csv, index=False, encoding='utf-8')
     return diferencias_vectorizadas
 
+# Función para almacenar reglas vectorizadas
 def almacenar_reglas_vectorizadas(texto_manual, tokens_referencia, indice_manual):
-    reglas_vectorizadas = {}
-    secciones = texto_manual.split("\n\n")  # Supongamos que las secciones están separadas por dos saltos de línea
+    # Implementar almacenamiento si es necesario
+    pass
 
-    for seccion in secciones:
-        seccion = seccion.strip()
-        if seccion:
-            titulo_seccion = extraer_titulo_seccion(seccion, indice_manual)
-            vector_tfidf = vectorizar_texto(seccion, tokens_referencia)
-            reglas_vectorizadas[titulo_seccion] = vector_tfidf.tolist()[0]
+# Función para cargar y vectorizar el manual
+def cargar_y_vectorizar_manual(file, file_type):
+    texto_manual = extraer_texto(file_type, file)
+    tokens_referencia = tokenizar_lineamientos([texto_manual])
+    almacenar_reglas_vectorizadas(texto_manual, tokens_referencia, None)
+    return tokens_referencia
 
-    return reglas_vectorizadas
+# Función para verificar el cumplimiento de las diferencias
+def verify_differences_compliance(diferencias, tokens_referencia):
+    for diferencia in diferencias:
+        doc_vector = vectorizer.transform([diferencia['contenido_documento']])
+        ref_vector = vectorizer.transform([diferencia['contenido_referencia']])
+        similitud = cosine_similarity(doc_vector, ref_vector)[0][0]
 
-def extraer_titulo_seccion(seccion, indice_manual):
-    for item in indice_manual:
-        if item in seccion:
-            return item
-    return "Seccion Desconocida"
+        diferencia['similitud'] = similitud
+        diferencia['recomendacion'] = 'Revisar' if similitud < 0.8 else 'Ok'
 
-def cargar_y_vectorizar_manual(file, file_type, tokens_referencia, indice_manual):
-    if file_type == "pdf":
-        texto_manual = extraer_texto_pdf(file)
-    elif file_type == "txt":
-        texto_manual = leer_archivo_texto(file)
-    elif file_type == "docx":
-        texto_manual = extraer_texto_docx(file)
-    else:
-        return None
-
-    reglas_vectorizadas = almacenar_reglas_vectorizadas(texto_manual, tokens_referencia, indice_manual)
-    ruta_archivo_csv = "data/output/manual_vectorizado.csv"
-    with open(ruta_archivo_csv, 'w', encoding='utf-8', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["Regla", "Vector"])
-        for regla, vector in reglas_vectorizadas.items():
-            writer.writerow([regla, json.dumps(vector)])
-    return ruta_archivo_csv
+# Esta función ahora está en utils.py, pero aquí está para referencia
+def verificar_cumplimiento(texto_comparar, tokens_referencia):
+    diferencias = encontrar_diferencias(texto_comparar, " ".join(tokens_referencia))
+    diferencias_vectorizadas = vectorizar_y_tokenizar_diferencias(diferencias, tokens_referencia, "Comparar", "Referencia")
+    return diferencias_vectorizadas
