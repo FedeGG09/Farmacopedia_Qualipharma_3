@@ -1,7 +1,14 @@
 import streamlit as st
 import pandas as pd
-from hugchat import hugchat
-from hugchat.login import Login
+from langchain.chains import ConversationalRetrievalChain
+from langchain.document_loaders import PyPDFLoader, DirectoryLoader
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.llms import CTransformers
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.vectorstores import FAISS
+from langchain.memory import ConversationBufferMemory
+import tempfile
+import os
 from document_analysis import (
     extraer_texto_pdf,
     extraer_texto_docx,
@@ -13,10 +20,7 @@ from document_analysis import (
     cargar_y_vectorizar_manual
 )
 from utils import verify_differences_compliance  # Importar la nueva función
-
-# Obtener el correo electrónico y la contraseña de las secrets
-hf_email = st.secrets["HF_EMAIL"]
-hf_pass = st.secrets["HF_PASS"]
+from templatesStreamlit import css, user_template2, bot_template2
 
 # Función para procesar documentos
 def procesar_documentos(uploaded_reference_file, uploaded_compare_file, reference_file_type, compare_file_type):
@@ -109,6 +113,45 @@ def compare_additional_files(tokens_referencia, file1, file2, file1_type, file2_
     
     return diferencias_vectorizadas1, diferencias_vectorizadas2
 
+# Función para leer los documentos y convertirlos en chunks
+def load_documents(uploaded_files):
+    docs = []
+    temp_dir = tempfile.TemporaryDirectory()
+    for file in uploaded_files:
+        temp_filepath = os.path.join(temp_dir.name, file.name)
+        with open(temp_filepath, "wb") as f:
+            f.write(file.getvalue())
+        loader = PyPDFLoader(temp_filepath)
+        docs.extend(loader.load())
+    return docs
+
+def split_text_into_chunks(documents):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    text_chunks = text_splitter.split_documents(documents)
+    return text_chunks
+
+def get_vectorstore(text_chunks):
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2", model_kwargs={'device': "cpu"})
+    vector_store = FAISS.from_documents(text_chunks, embeddings)
+    return vector_store
+
+def get_conversation_chain(vector_store):
+    llm = CTransformers(model="mistral-7b-instruct-v0.1.Q4_K_M.gguf", config={'max_new_tokens': 128, 'temperature': 0.01})
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+    conversation_chain = ConversationalRetrievalChain.from_llm(llm=llm, chain_type='stuff',
+                                                               retriever=vector_store.as_retriever(search_kwargs={"k": 2}),
+                                                               memory=memory)
+    return conversation_chain
+
+def handle_userinput(user_question):
+    response = st.session_state.conversation({'question': user_question})
+    st.session_state.chat_history = response['chat_history']
+    for i, message in enumerate(st.session_state.chat_history):
+        if i % 2 == 0:
+            st.write(user_template2.replace("{{MSG}}", message.content), unsafe_allow_html=True)
+        else:
+            st.write(bot_template2.replace("{{MSG}}", message.content), unsafe_allow_html=True)
+
 # Interfaz Streamlit
 st.set_page_config(page_title="Qualipharma - Analytics Town", page_icon="🧪")
 st.title("Qualipharma - Analytics Town")
@@ -194,39 +237,22 @@ if st.sidebar.button("Verificar Cumplimiento de Diferencias") and uploaded_file1
     else:
         st.error("Primero debes cargar y vectorizar el manual de referencia.")
 
-# Store LLM generated responses
-if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "How may I help you?"}]
+# Inicializar estado de sesión para chat
+if "conversation" not in st.session_state:
+    st.session_state.conversation = None
 
-# Display chat messages
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
+# Cargar archivos para el chat
+st.header("Cargar Archivos para el Chat")
+uploaded_files = st.file_uploader("Sube tus archivos (PDF, DOCX, TXT)", type=["pdf", "docx", "txt"], accept_multiple_files=True)
+if uploaded_files:
+    documents = load_documents(uploaded_files)
+    text_chunks = split_text_into_chunks(documents)
+    vectorstore = get_vectorstore(text_chunks)
+    st.session_state.conversation = get_conversation_chain(vectorstore)
+    st.success("Archivos cargados y procesados para el chat.")
 
-# Function for generating LLM response
-def generate_response(prompt_input, email, passwd):
-    try:
-        # Hugging Face Login
-        sign = Login(email, passwd)
-        cookies = sign.login()
-        # Create ChatBot
-        chatbot = hugchat.ChatBot(cookies=cookies.get_dict())
-        return chatbot.chat(prompt_input)
-    except Exception as e:
-        st.error(f"An error occurred during login or chatbot creation: {e}")
-        return "Failed to generate response."
-
-# User-provided prompt
-if prompt := st.chat_input():
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.write(prompt)
-
-    # Generate a new response if last message is not from assistant
-    if st.session_state.messages[-1]["role"] != "assistant":
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = generate_response(prompt, hf_email, hf_pass)
-                st.write(response)
-        message = {"role": "assistant", "content": response}
-        st.session_state.messages.append(message)
+# Interfaz de chat
+st.header("Chat con el Asistente")
+user_question = st.text_input("Haz una pregunta sobre los documentos:")
+if user_question:
+    handle_userinput(user_question)
